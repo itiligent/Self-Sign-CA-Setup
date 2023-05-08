@@ -6,20 +6,13 @@
 ######################################################################################################################
 
 # Some useful OpenSSL testing commands:
-# Verify new cert: openssl x509 -noout -text -in /path/to/script/cert-name.cert.pem"
+# Verify new cert: openssl x509 -noout -text -in /path/to/script/cert-name.cert.pem
 # Verify CA trust chain: openssl verify -CAfile $CA_ROOT_DIR/certs/ca.cert.pem $CA_ROOT_DIR/intermediate/certs/intermediate.cert.pem
 # Verify certificate trust chain: openssl verify -CAfile $CA_ROOT_DIR/certs/ca.cert.pem -untrusted $CA_INT_DIR/certs/intermediate.cert.pem $CA_INT_DIR/certs/$CERT_NAME_SRV.cert.pem
 # Verify CRL: openssl crl -in $CA_INT_DIR/crl/intermediate.crl.pem -noout -text
 # Verify OCSP certificate: openssl x509 -noout -text -in $CA_ROOT_DIR/intermediate/certs/intermediate.ocsp.cert.pem
 # Manually run the OCSP responder: openssl ocsp -port 2560 -text -index $CA_ROOT_DIR/intermediate/index.txt -CA intermediate/certs/ca-chain.cert.pem -rkey intermediate/private/intermediate.ocsp.key.pem -rsigner intermediate/certs/intermediate.ocsp.cert.pem -nrequest 1
 # Manually query the OCSP responder: openssl ocsp -CAfile intermediate/certs/ca-chain.cert.pem -url http://127.0.0.1:2560 -resp_text -issuer intermediate/certs/intermediate.cert.pem -cert intermediate/certs/${REVOKE_OCSP}
-
-# EC commands yet to be implemented
-#openssl ecparam -out intermediate/private/test3.key.pem | openssl ec -aes256 -out intermediate/private/test3.key.pem
-#openssl genpkey -algorithm ec -pkeyopt ec_paramgen_curve:secp160k1 -aes-256-cbc -out myprivatekey_encrypted.pem
-#openssl genpkey -algorithm ec -pkeyopt ec_paramgen_curve:secp160k1 -aes-256-cbc -out myprivatekey_encrypted.pem
-#openssl ecparam -name secp256k1 -out ecparam.pem
-#openssl genpkey -paramfile ecparam.pem -out key.pem -aes-128-cbc -pass pass:HereIsThePassword
 
 # Prepare text output colours
 GREY='\033[0;37m'
@@ -32,29 +25,30 @@ NC='\033[0m' #No Colour
 
 # Initialise variables
 ALGORITHM="RSA"						# RSA or EC (EC commands yet to be implemented)
-ROOT_CA_DAYS="9215"					# Root CA lifetime
-INT_CA_DAYS="7300"					# Intermediate CA lifetime
+CA_ROOT_DAYS="9215"					# Root CA lifetime
+CA_INT_DAYS="7300"					# Intermediate CA lifetime
+CA_PW="1111"						# Password to secure root & intermediate CA keys/certs
+CERT_DAYS="3650"					# Number of days until new elf signed certificates will expire
+CERT_PW="false"						# true/false (whether to encrypt user and server certs with an -aes256 password)
 CERT_COUNTRY="AU"					# 2 country character code only, must not be blank
 CERT_STATE="Victoria"				# must not be blank
 CERT_LOCALITY="Melbourne"			# must not be blank
 CERT_ORG="Itiligent"				# must not be blank
 CERT_OU="I.T."						# must not be blank
-CERT_DAYS="3650"					# Number of days until new elf signed certificates will expire
 CERT_EMAIL="admin@domain.com"		# Email to include inside certificates
 
 # Set the various file paths
 USER_HOME_DIR=$(eval echo ~${SUDO_USER})
-CA_ROOT_DIR=$USER_HOME_DIR/ca
+CA_ROOT_DIR=$USER_HOME_DIR/ca$ALGORITHM
 CA_INT_DIR=$CA_ROOT_DIR/intermediate
 #LOG_LOCATION=$CA_ROOT_DIR/ca_setup.log
 LOG_LOCATION=/dev/null 2>&1
 
-# Begin interactive menu ##########################################################################################
 
+# Begin interactive menu ##########################################################################################
 
 # Script branding header
 clear
-cd $USER_HOME_DIR
 echo -e "
 
 	${GREYB}Itiligent Self Signed CA Setup & Operation.
@@ -63,9 +57,11 @@ echo -e "
 
 	${GREY}Script defaults:${DGREY}
 	${DGREY}Encryption method\t= ${ALGORITHM}
-	${DGREY}Root CA days\t\t= ${ROOT_CA_DAYS}
-	Intermediate CA days\t= ${INT_CA_DAYS}
-	New certificate days\t= ${CERT_DAYS}
+	${DGREY}Root CA days\t\t= ${CA_ROOT_DAYS}
+	Intermediate CA days\t= ${CA_INT_DAYS}
+	CA key & cert password\t= ${CA_PW}
+	New cert days\t\t= ${CERT_DAYS}
+	New cert has password\t= ${CERT_PW}
 	Cert country\t\t= ${CERT_COUNTRY}
 	Cert state\t\t= ${CERT_STATE}
 	Cert locality\t\t= ${CERT_LOCALITY}
@@ -89,6 +85,7 @@ echo -e "
 	8) Exit
 	" > /tmp/menufile
 
+
 while [[ 1 ]]
 do
 cat /tmp/menufile
@@ -99,7 +96,7 @@ cat /tmp/menufile
 	clear
 	echo
 	# Check if there is already a CA base present, and only create a new CA root structure if there are no root CA files in existence
-	cd $USER_HOME_DIR
+	cd $CA_ROOT_DIR
 	if [ "$( find . -maxdepth 4 \( -name '*ca.key.pem' -o -name '*ca.cert.pem' \) )" != "" ]; then
 	echo
 	echo -e "${LRED}Existing CA configuration detected, please review CA status before continuing.${GREY}" 1>&2
@@ -390,14 +387,14 @@ EOF
 	echo
 	fi
 
+
 # RSA specific actions ############################################################################################
 
-
 	# Generate RSA root key
-	if [[ "${ALGORITHM}" == "RSA" ]]; then
+if [[ "${ALGORITHM}" == "RSA" ]]; then
 	cd $CA_ROOT_DIR
 	echo -e "${GREYB}Generating root key...${GREY}"
-	openssl genrsa -aes256 -out private/ca.key.pem 4096
+	openssl genrsa -aes256 -passout pass:$CA_PW -out private/ca.key.pem 4096
 	chmod 400 private/ca.key.pem
 	if [ $? -ne 0 ]; then
 	echo -e "${RED}Failed. See ${LOG_LOCATION}${GREY}" 1>&2
@@ -409,7 +406,7 @@ EOF
 
 	# Generate RSA root certificate
 	echo -e "${GREYB}Generating root CA certificate...${GREY}"
-	openssl req -config openssl.cnf -key private/ca.key.pem -new -x509 -days $ROOT_CA_DAYS -sha256 -extensions v3_ca -out certs/ca.cert.pem
+	openssl req -config openssl.cnf -key private/ca.key.pem -new -x509 -days $CA_ROOT_DAYS -sha256 -extensions v3_ca -out certs/ca.cert.pem -passin pass:$CA_PW
 	if [ $? -ne 0 ]; then
 	echo -e "${RED}Failed. See ${LOG_LOCATION}${GREY}" 1>&2
 	exit 1
@@ -420,7 +417,7 @@ EOF
 
 	# Generate RSA intermediate key
 	echo -e "${GREYB}Generating intermediate CA key...${GREY}"
-	openssl genrsa -aes256 -out intermediate/private/intermediate.key.pem 4096
+	openssl genrsa -aes256 -passout pass:$CA_PW -out intermediate/private/intermediate.key.pem 4096 
 	chmod 400 intermediate/private/intermediate.key.pem
 	if [ $? -ne 0 ]; then
 	echo -e "${RED}Failed. See ${LOG_LOCATION}${GREY}" 1>&2
@@ -429,10 +426,57 @@ EOF
 	echo -e "${LGREEN}OK${GREY}"
 	echo
 	fi
+fi
 
-	# Generate RSA Intermediate CA csr
+# EC specific actions #############################################################################################
+
+if [[ "${ALGORITHM}" == "EC" ]]; then
+	cd $CA_ROOT_DIR
+	# Generate EC root private key with NIST recommended curve ECDSA P-384, and then encrypt it
+	echo -e "${GREYB}Generating root key...${GREY}"
+	openssl ecparam -name secp384r1 -genkey -noout -out private/ca-no-encrypt.key.pem
+	openssl ec -aes256 -in private/ca-no-encrypt.key.pem -out private/ca.key.pem -passout pass:$CA_PW
+	rm private/ca-no-encrypt.key.pem
+	chmod 400 private/ca.key.pem
+	if [ $? -ne 0 ]; then
+	echo -e "${RED}Failed. See ${LOG_LOCATION}${GREY}" 1>&2
+	exit 1
+	else
+	echo -e "${LGREEN}OK${GREY}"
+	echo
+	fi
+
+	# Generate EC root certificate
+	echo -e "${GREYB}Generating root CA certificate...${GREY}"
+	openssl req -config openssl.cnf -key private/ca.key.pem -new -x509 -days $CA_ROOT_DAYS -sha256 -extensions v3_ca -out certs/ca.cert.pem -passin pass:$CA_PW
+	if [ $? -ne 0 ]; then
+	echo -e "${RED}Failed. See ${LOG_LOCATION}${GREY}" 1>&2
+	exit 1
+	else
+	echo -e "${LGREEN}OK${GREY}"
+	echo
+	fi
+	
+	# Generate EC intermediate key
+	echo -e "${GREYB}Generating intermediate CA key...${GREY}"
+	openssl ecparam -name secp384r1 -genkey -noout -out intermediate/private/intermediate-no-encrpyt.key.pem
+	openssl ec -aes256 -in intermediate/private/intermediate-no-encrpyt.key.pem -out intermediate/private/intermediate.key.pem -passout pass:$CA_PW
+	rm intermediate/private/intermediate-no-encrpyt.key.pem
+	chmod 400 intermediate/private/intermediate.key.pem
+	if [ $? -ne 0 ]; then
+	echo -e "${RED}Failed. See ${LOG_LOCATION}${GREY}" 1>&2
+	exit 1
+	else
+	echo -e "${LGREEN}OK${GREY}"
+	echo
+	fi
+fi
+
+# RSA or EC CA creation actions #############################################################################################
+
+	# Generate Intermediate CA csr
 	echo -e "${GREYB}Generating intermediate CA certificate signing request...${GREY}"
-	openssl req -config intermediate/openssl.cnf -new -sha256 -key intermediate/private/intermediate.key.pem -out intermediate/csr/intermediate.csr.pem
+	openssl req -config intermediate/openssl.cnf -new -sha256 -key intermediate/private/intermediate.key.pem -out intermediate/csr/intermediate.csr.pem -passin pass:$CA_PW
 	if [ $? -ne 0 ]; then
 	echo -e "${RED}Failed. See ${LOG_LOCATION}${GREY}" 1>&2
 	exit 1
@@ -441,9 +485,9 @@ EOF
 	echo
 	fi
 
-	# Generate RSA Intermediate CA
+	# Generate Intermediate CA
 	echo -e "${GREYB}Generating the new intermediate CA certificate...${GREY}"
-	openssl ca -config openssl.cnf -extensions v3_intermediate_ca -days $INT_CA_DAYS -notext -md sha256 -in intermediate/csr/intermediate.csr.pem -out intermediate/certs/intermediate.cert.pem
+	openssl ca -config openssl.cnf -extensions v3_intermediate_ca -days $CA_INT_DAYS -notext -md sha256 -in intermediate/csr/intermediate.csr.pem -out intermediate/certs/intermediate.cert.pem -passin pass:$CA_PW
 	if [ $? -ne 0 ]; then
 	echo -e "${RED}Failed. See ${LOG_LOCATION}${GREY}" 1>&2
 	exit 1
@@ -452,7 +496,7 @@ EOF
 	echo
 	fi
 
-	# The RSA CA certificate chain comprises of the intermediate cert and the root cert (in that order)
+	# The CA certificate chain comprises of the intermediate cert and the root cert (in that order)
 	echo -e "${GREYB}Generating CA certificate chain file with root cert included (for standalone web servers)...${GREY}"
 	cat intermediate/certs/intermediate.cert.pem certs/ca.cert.pem > intermediate/certs/ca-chain.cert.pem
 	chmod 444 intermediate/certs/ca-chain.cert.pem
@@ -475,31 +519,6 @@ EOF
 	echo -e "${LGREEN}OK${GREY}"
 	fi
 
-fi
-
-# EC specific actions #############################################################################################
-
-
-	if [[ "${ALGORITHM}" == "EC" ]]; then
-
-	# Generate RSA root key
-
-	# Generate RSA root certificate
-
-
-	# Generate RSA intermediate key
-
-
-	# Generate RSA Intermediate CA csr
-
-	# Generate RSA Intermediate CA
-
-	# Generate the RSA CA chain (this must comprise of the intermediate cert and the root cert (in that order))
-
-
-	# 2nd RSA CA chain option -  here we install the root certificate on every client, and generate the chain file with only the intermediate certificate
-	fi
-
 	sleep 4
 	clear
 ;;
@@ -509,7 +528,7 @@ fi
 	clear
 	echo
 	# Check for presence of CA base
-	cd $USER_HOME_DIR
+	cd $CA_ROOT_DIR
 	if [ "$( find . -maxdepth 4 \( -name 'ca.key.pem' -o -name 'ca.cert.pem' \) )" = "" ]; then
 	echo
 	echo -e "${LRED}CA base configuration not detected. Please check system status before continuing.${GREY}" 1>&2
@@ -550,7 +569,7 @@ fi
 	clear
 	echo
 	# Check for presence of CA base
-	cd $USER_HOME_DIR
+	cd $CA_ROOT_DIR
 	if [ "$( find . -maxdepth 4 \( -name 'ca.key.pem' -o -name 'ca.cert.pem' \) )" = "" ]; then
 	echo
 	echo -e "${LRED}CA base configuration not detected. Please check system status before continuing.${GREY}" 1>&2
@@ -583,7 +602,7 @@ openssl ocsp -port 2560 -text -index $CA_ROOT_DIR/intermediate/index.txt -CA int
 #Query the responder
 # openssl ocsp -CAfile intermediate/certs/ca-chain.cert.pem -url http://127.0.0.1:2560 -resp_text -issuer intermediate/certs/intermediate.cert.pem -cert intermediate/certs/${REVOKE_OCSP}
 EOF
-	chmod +x startOCSP.sh
+	chmod +x $CA_ROOT_DIR/startOCSP.sh
 
 # RSA specific actions ############################################################################################
 
@@ -592,7 +611,7 @@ EOF
 	if [[ "${ALGORITHM}" = "RSA" ]]; then
 	openssl genrsa -aes256 -out intermediate/private/intermediate.ocsp.key.pem 4096
 	openssl req -config intermediate/openssl.cnf -new -sha256 -key intermediate/private/intermediate.ocsp.key.pem -out intermediate/csr/intermediate.ocsp.csr.pem
-	openssl ca -config intermediate/openssl.cnf -extensions ocsp -days $INT_CA_DAYS -notext -md sha256 -in intermediate/csr/intermediate.ocsp.csr.pem -out intermediate/certs/intermediate.ocsp.cert.pem
+	openssl ca -config intermediate/openssl.cnf -extensions ocsp -days $CA_INT_DAYS -notext -md sha256 -in intermediate/csr/intermediate.ocsp.csr.pem -out intermediate/certs/intermediate.ocsp.cert.pem
 	if [ $? -ne 0 ]; then
 	echo -e "${RED}Failed. See ${LOG_LOCATION}${GREY}" 1>&2
 	exit 1
@@ -618,7 +637,7 @@ fi
 	else
 	echo -e "${LGREEN}OK${GREY}"
 	fi
-	fi
+fi
 
 	sleep 4
 	clear
@@ -631,7 +650,7 @@ fi
 	clear
 	echo
 	# Check for presence of CA base
-	cd $USER_HOME_DIR
+	cd $CA_ROOT_DIR
 	if [ "$( find . -maxdepth 4 \( -name 'ca.key.pem' -o -name 'ca.cert.pem' \) )" = "" ]; then
 	echo
 	echo -e "${LRED}CA base configuration not detected. Please check system status before continuing.${GREY}" 1>&2
@@ -669,8 +688,11 @@ fi
 	if [[ "${ALGORITHM}" = "RSA" ]]; then
 	# Create a new server private key
 	cd $CA_ROOT_DIR
-	#openssl genrsa -aes256 -out intermediate/private/$CERT_NAME_SRV.key.pem 2048 # use this line to require a server cert password
+	if [[ "${CERT_PW}" = "true" ]]; then
+	openssl genrsa -aes256 -out intermediate/private/$CERT_NAME_SRV.key.pem 2048 # use this line to require a server cert password
+	else
 	openssl genrsa -out intermediate/private/$CERT_NAME_SRV.key.pem 2048
+	fi
 	chmod 400 intermediate/private/$CERT_NAME_SRV.key.pem
 
 	# Create a new CSR
@@ -706,7 +728,7 @@ fi
 
 	# Create EC server certificate pair
 	if [[ "${ALGORITHM}" = "EC" ]]; then
-		# Create a new server private key
+	# Create a new server private key
 	cd $CA_ROOT_DIR
 	# use this line to require a server cert password
 	#
@@ -729,7 +751,7 @@ fi
 	clear
 	echo
 	# Check for presence of CA base
-	cd $USER_HOME_DIR
+	cd $CA_ROOT_DIR
 	if [ "$( find . -maxdepth 4 \( -name 'ca.key.pem' -o -name 'ca.cert.pem' \) )" = "" ]; then
 	echo
 	echo -e "${LRED}CA base configuration not detected. Please check system status before continuing.${GREY}" 1>&2
@@ -764,8 +786,11 @@ fi
 
 	# Create a new user private key
 	cd $CA_ROOT_DIR
-	#openssl genrsa -aes256 -out intermediate/private/$CERT_NAME_USR.key.pem 2048 # require a cert password
+	if [[ "${CERT_PW}" = "true" ]]; then
+	openssl genrsa -aes256 -out intermediate/private/$CERT_NAME_USR.key.pem 2048 # require a cert password
+	else
 	openssl genrsa -out intermediate/private/$CERT_NAME_USR.key.pem 2048
+	fi
 	chmod 400 intermediate/private/$CERT_NAME_USR.key.pem
 
 	# Create a new CSR
@@ -822,7 +847,7 @@ fi
 	clear
 	echo
 	# Check for presence of CRL config
-	cd $USER_HOME_DIR
+	cd $CA_ROOT_DIR
 	if [ "$( find . -maxdepth 4 \( -name 'intermediate.crl.pem' \) )" = "" ]; then
 	echo
 	echo -e "${LRED}CRL configuration not detected. Please check system status before continuing.${GREY}" 1>&2
@@ -849,7 +874,7 @@ fi
 	clear
 	echo
 	# Check for presence of OCSP config
-	cd $USER_HOME_DIR
+	cd $CA_ROOT_DIR
 	if [ "$( find . -maxdepth 4 \( -name 'intermediate.ocsp.key.pem' -o -name 'intermediate.ocsp.key.pem' \) )" = "" ]; then
 	echo
 	echo -e "${LRED}OCSP configuration not detected. Please check system status before continuing.${GREY}" 1>&2
