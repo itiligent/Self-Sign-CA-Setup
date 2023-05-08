@@ -39,7 +39,7 @@ CERT_EMAIL="admin@domain.com"		# Email to include inside certificates
 
 # Set the various file paths
 USER_HOME_DIR=$(eval echo ~${SUDO_USER})
-CA_ROOT_DIR=$USER_HOME_DIR/ca$ALGORITHM
+CA_ROOT_DIR=$USER_HOME_DIR/ca
 CA_INT_DIR=$CA_ROOT_DIR/intermediate
 #LOG_LOCATION=$CA_ROOT_DIR/ca_setup.log
 LOG_LOCATION=/dev/null 2>&1
@@ -96,7 +96,7 @@ cat /tmp/menufile
 	clear
 	echo
 	# Check if there is already a CA base present, and only create a new CA root structure if there are no root CA files in existence
-	cd $CA_ROOT_DIR
+	cd $USER_HOME_DIR
 	if [ "$( find . -maxdepth 4 \( -name '*ca.key.pem' -o -name '*ca.cert.pem' \) )" != "" ]; then
 	echo
 	echo -e "${LRED}Existing CA configuration detected, please review CA status before continuing.${GREY}" 1>&2
@@ -621,13 +621,11 @@ EOF
 
 fi
 
-
 # EC specific actions #############################################################################################
 
 	# Setup and activate OCSP
 	if [[ "${ALGORITHM}" == "EC" ]]; then
 	cd $CA_ROOT_DIR
-
 
 ## EC COMMANDS HERE
 
