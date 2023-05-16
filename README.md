@@ -10,7 +10,7 @@
   #### Prerequisites: OpenSSL + any Linux flavour with a bash shell (or WSL)
   
   #### Notes: 
- * Save script default to either RSA & Elliptical Curve prior to starting
+ * Set script default to either RSA & Elliptical Curve prior to starting
  * Script is fully functional with RSA, EC is experimental
  * To do: 
     *  Complete the implementation of Elliptic Curve options
